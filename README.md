@@ -1,4 +1,9 @@
-brackets-extensions
+Best Brackets Extensions
 ===================
 
-These are a compilations of my favorite brackets extensions.
+A compilations of my favorite brackets extensions.
+
+
+
+
+
