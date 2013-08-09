@@ -243,6 +243,241 @@ EventEmitter.prototype.listeners = function(type) {
 
 })(require("__browserify_process"))
 },{"__browserify_process":1}],3:[function(require,module,exports){
+/*
+ * Regular expressions. Some of these are stupidly long.
+ */
+
+/*jshint maxlen:1000 */
+
+"use string";
+
+// Unsafe comment or string (ax)
+exports.unsafeString =
+	/@cc|<\/?|script|\]\s*\]|<\s*!|&lt/i;
+
+// Unsafe characters that are silently deleted by one or more browsers (cx)
+exports.unsafeChars =
+	/[\u0000-\u001f\u007f-\u009f\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/;
+
+// Characters in strings that need escaping (nx and nxg)
+exports.needEsc =
+	/[\u0000-\u001f&<"\/\\\u007f-\u009f\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/;
+
+exports.needEscGlobal =
+	/[\u0000-\u001f&<"\/\\\u007f-\u009f\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/g;
+
+// Star slash (lx)
+exports.starSlash = /\*\//;
+
+// Identifier (ix)
+exports.identifier = /^([a-zA-Z_$][a-zA-Z0-9_$]*)$/;
+
+// JavaScript URL (jx)
+exports.javascriptURL = /^(?:javascript|jscript|ecmascript|vbscript|mocha|livescript)\s*:/i;
+
+// Catches /* falls through */ comments (ft)
+exports.fallsThrough = /^\s*\/\*\s*falls?\sthrough\s*\*\/\s*$/;
+
+},{}],4:[function(require,module,exports){
+"use strict";
+
+var state = {
+	syntax: {},
+
+	reset: function () {
+		this.tokens = {
+			prev: null,
+			next: null,
+			curr: null
+		},
+
+		this.option = {};
+		this.ignored = {};
+		this.directive = {};
+		this.jsonMode = false;
+		this.jsonWarnings = [];
+		this.lines = [];
+		this.tab = "";
+		this.cache = {}; // Node.JS doesn't have Map. Sniff.
+	}
+};
+
+exports.state = state;
+
+},{}],5:[function(require,module,exports){
+(function(){"use strict";
+
+exports.register = function (linter) {
+	// Check for properties named __proto__. This special property was
+	// deprecated and then re-introduced for ES6.
+
+	linter.on("Identifier", function style_scanProto(data) {
+		if (linter.getOption("proto")) {
+			return;
+		}
+
+		if (data.name === "__proto__") {
+			linter.warn("W103", {
+				line: data.line,
+				char: data.char,
+				data: [ data.name ]
+			});
+		}
+	});
+
+	// Check for properties named __iterator__. This is a special property
+	// available only in browsers with JavaScript 1.7 implementation.
+
+	linter.on("Identifier", function style_scanIterator(data) {
+		if (linter.getOption("iterator")) {
+			return;
+		}
+
+		if (data.name === "__iterator__") {
+			linter.warn("W104", {
+				line: data.line,
+				char: data.char,
+				data: [ data.name ]
+			});
+		}
+	});
+
+	// Check for dangling underscores.
+
+	linter.on("Identifier", function style_scanDangling(data) {
+		if (!linter.getOption("nomen")) {
+			return;
+		}
+
+		// Underscore.js
+		if (data.name === "_") {
+			return;
+		}
+
+		// In Node, __dirname and __filename should be ignored.
+		if (linter.getOption("node")) {
+			if (/^(__dirname|__filename)$/.test(data.name) && !data.isProperty) {
+				return;
+			}
+		}
+
+		if (/^(_+.*|.*_+)$/.test(data.name)) {
+			linter.warn("W105", {
+				line: data.line,
+				char: data.from,
+				data: [ "dangling '_'", data.name ]
+			});
+		}
+	});
+
+	// Check that all identifiers are using camelCase notation.
+	// Exceptions: names like MY_VAR and _myVar.
+
+	linter.on("Identifier", function style_scanCamelCase(data) {
+		if (!linter.getOption("camelcase")) {
+			return;
+		}
+
+		if (data.name.replace(/^_+/, "").indexOf("_") > -1 && !data.name.match(/^[A-Z0-9_]*$/)) {
+			linter.warn("W106", {
+				line: data.line,
+				char: data.from,
+				data: [ data.name ]
+			});
+		}
+	});
+
+	// Enforce consistency in style of quoting.
+
+	linter.on("String", function style_scanQuotes(data) {
+		var quotmark = linter.getOption("quotmark");
+		var code;
+
+		if (!quotmark) {
+			return;
+		}
+
+		// If quotmark is set to 'single' warn about all double-quotes.
+
+		if (quotmark === "single" && data.quote !== "'") {
+			code = "W109";
+		}
+
+		// If quotmark is set to 'double' warn about all single-quotes.
+
+		if (quotmark === "double" && data.quote !== "\"") {
+			code = "W108";
+		}
+
+		// If quotmark is set to true, remember the first quotation style
+		// and then warn about all others.
+
+		if (quotmark === true) {
+			if (!linter.getCache("quotmark")) {
+				linter.setCache("quotmark", data.quote);
+			}
+
+			if (linter.getCache("quotmark") !== data.quote) {
+				code = "W110";
+			}
+		}
+
+		if (code) {
+			linter.warn(code, {
+				line: data.line,
+				char: data.char,
+			});
+		}
+	});
+
+	linter.on("Number", function style_scanNumbers(data) {
+		if (data.value.charAt(0) === ".") {
+			// Warn about a leading decimal point.
+			linter.warn("W008", {
+				line: data.line,
+				char: data.char,
+				data: [ data.value ]
+			});
+		}
+
+		if (data.value.substr(data.value.length - 1) === ".") {
+			// Warn about a trailing decimal point.
+			linter.warn("W047", {
+				line: data.line,
+				char: data.char,
+				data: [ data.value ]
+			});
+		}
+
+		if (/^00+/.test(data.value)) {
+			// Multiple leading zeroes.
+			linter.warn("W046", {
+				line: data.line,
+				char: data.char,
+				data: [ data.value ]
+			});
+		}
+	});
+
+	// Warn about script URLs.
+
+	linter.on("String", function style_scanJavaScriptURLs(data) {
+		var re = /^(?:javascript|jscript|ecmascript|vbscript|mocha|livescript)\s*:/i;
+
+		if (linter.getOption("scripturl")) {
+			return;
+		}
+
+		if (re.test(data.value)) {
+			linter.warn("W107", {
+				line: data.line,
+				char: data.char
+			});
+		}
+	});
+};
+})()
+},{}],6:[function(require,module,exports){
 (function(){// jshint -W001
 
 "use strict";
@@ -797,244 +1032,9 @@ exports.yui = {
 
 
 })()
-},{}],4:[function(require,module,exports){
-/*
- * Regular expressions. Some of these are stupidly long.
- */
-
-/*jshint maxlen:1000 */
-
-"use string";
-
-// Unsafe comment or string (ax)
-exports.unsafeString =
-	/@cc|<\/?|script|\]\s*\]|<\s*!|&lt/i;
-
-// Unsafe characters that are silently deleted by one or more browsers (cx)
-exports.unsafeChars =
-	/[\u0000-\u001f\u007f-\u009f\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/;
-
-// Characters in strings that need escaping (nx and nxg)
-exports.needEsc =
-	/[\u0000-\u001f&<"\/\\\u007f-\u009f\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/;
-
-exports.needEscGlobal =
-	/[\u0000-\u001f&<"\/\\\u007f-\u009f\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/g;
-
-// Star slash (lx)
-exports.starSlash = /\*\//;
-
-// Identifier (ix)
-exports.identifier = /^([a-zA-Z_$][a-zA-Z0-9_$]*)$/;
-
-// JavaScript URL (jx)
-exports.javascriptURL = /^(?:javascript|jscript|ecmascript|vbscript|mocha|livescript)\s*:/i;
-
-// Catches /* falls through */ comments (ft)
-exports.fallsThrough = /^\s*\/\*\s*falls?\sthrough\s*\*\/\s*$/;
-
-},{}],5:[function(require,module,exports){
-"use strict";
-
-var state = {
-	syntax: {},
-
-	reset: function () {
-		this.tokens = {
-			prev: null,
-			next: null,
-			curr: null
-		},
-
-		this.option = {};
-		this.ignored = {};
-		this.directive = {};
-		this.jsonMode = false;
-		this.jsonWarnings = [];
-		this.lines = [];
-		this.tab = "";
-		this.cache = {}; // Node.JS doesn't have Map. Sniff.
-	}
-};
-
-exports.state = state;
-
-},{}],6:[function(require,module,exports){
-(function(){"use strict";
-
-exports.register = function (linter) {
-	// Check for properties named __proto__. This special property was
-	// deprecated and then re-introduced for ES6.
-
-	linter.on("Identifier", function style_scanProto(data) {
-		if (linter.getOption("proto")) {
-			return;
-		}
-
-		if (data.name === "__proto__") {
-			linter.warn("W103", {
-				line: data.line,
-				char: data.char,
-				data: [ data.name ]
-			});
-		}
-	});
-
-	// Check for properties named __iterator__. This is a special property
-	// available only in browsers with JavaScript 1.7 implementation.
-
-	linter.on("Identifier", function style_scanIterator(data) {
-		if (linter.getOption("iterator")) {
-			return;
-		}
-
-		if (data.name === "__iterator__") {
-			linter.warn("W104", {
-				line: data.line,
-				char: data.char,
-				data: [ data.name ]
-			});
-		}
-	});
-
-	// Check for dangling underscores.
-
-	linter.on("Identifier", function style_scanDangling(data) {
-		if (!linter.getOption("nomen")) {
-			return;
-		}
-
-		// Underscore.js
-		if (data.name === "_") {
-			return;
-		}
-
-		// In Node, __dirname and __filename should be ignored.
-		if (linter.getOption("node")) {
-			if (/^(__dirname|__filename)$/.test(data.name) && !data.isProperty) {
-				return;
-			}
-		}
-
-		if (/^(_+.*|.*_+)$/.test(data.name)) {
-			linter.warn("W105", {
-				line: data.line,
-				char: data.from,
-				data: [ "dangling '_'", data.name ]
-			});
-		}
-	});
-
-	// Check that all identifiers are using camelCase notation.
-	// Exceptions: names like MY_VAR and _myVar.
-
-	linter.on("Identifier", function style_scanCamelCase(data) {
-		if (!linter.getOption("camelcase")) {
-			return;
-		}
-
-		if (data.name.replace(/^_+/, "").indexOf("_") > -1 && !data.name.match(/^[A-Z0-9_]*$/)) {
-			linter.warn("W106", {
-				line: data.line,
-				char: data.from,
-				data: [ data.name ]
-			});
-		}
-	});
-
-	// Enforce consistency in style of quoting.
-
-	linter.on("String", function style_scanQuotes(data) {
-		var quotmark = linter.getOption("quotmark");
-		var code;
-
-		if (!quotmark) {
-			return;
-		}
-
-		// If quotmark is set to 'single' warn about all double-quotes.
-
-		if (quotmark === "single" && data.quote !== "'") {
-			code = "W109";
-		}
-
-		// If quotmark is set to 'double' warn about all single-quotes.
-
-		if (quotmark === "double" && data.quote !== "\"") {
-			code = "W108";
-		}
-
-		// If quotmark is set to true, remember the first quotation style
-		// and then warn about all others.
-
-		if (quotmark === true) {
-			if (!linter.getCache("quotmark")) {
-				linter.setCache("quotmark", data.quote);
-			}
-
-			if (linter.getCache("quotmark") !== data.quote) {
-				code = "W110";
-			}
-		}
-
-		if (code) {
-			linter.warn(code, {
-				line: data.line,
-				char: data.char,
-			});
-		}
-	});
-
-	linter.on("Number", function style_scanNumbers(data) {
-		if (data.value.charAt(0) === ".") {
-			// Warn about a leading decimal point.
-			linter.warn("W008", {
-				line: data.line,
-				char: data.char,
-				data: [ data.value ]
-			});
-		}
-
-		if (data.value.substr(data.value.length - 1) === ".") {
-			// Warn about a trailing decimal point.
-			linter.warn("W047", {
-				line: data.line,
-				char: data.char,
-				data: [ data.value ]
-			});
-		}
-
-		if (/^00+/.test(data.value)) {
-			// Multiple leading zeroes.
-			linter.warn("W046", {
-				line: data.line,
-				char: data.char,
-				data: [ data.value ]
-			});
-		}
-	});
-
-	// Warn about script URLs.
-
-	linter.on("String", function style_scanJavaScriptURLs(data) {
-		var re = /^(?:javascript|jscript|ecmascript|vbscript|mocha|livescript)\s*:/i;
-
-		if (linter.getOption("scripturl")) {
-			return;
-		}
-
-		if (re.test(data.value)) {
-			linter.warn("W107", {
-				line: data.line,
-				char: data.char
-			});
-		}
-	});
-};
-})()
 },{}],"jshint":[function(require,module,exports){
-module.exports=require('E/GbHF');
-},{}],"E/GbHF":[function(require,module,exports){
+module.exports=require('J3S9ww');
+},{}],"J3S9ww":[function(require,module,exports){
 (function(){/*!
  * JSHint, by JSHint Community.
  *
@@ -5598,7 +5598,7 @@ if (typeof exports === "object" && exports) {
 }
 
 })()
-},{"events":2,"../shared/vars.js":3,"../shared/messages.js":7,"./reg.js":4,"./state.js":5,"./lex.js":8,"./style.js":6,"underscore":9,"console-browserify":10}],9:[function(require,module,exports){
+},{"events":2,"./reg.js":3,"./state.js":4,"./style.js":5,"../shared/vars.js":6,"../shared/messages.js":7,"./lex.js":8,"underscore":9,"console-browserify":10}],9:[function(require,module,exports){
 (function(){//     Underscore.js 1.4.4
 //     http://underscorejs.org
 //     (c) 2009-2013 Jeremy Ashkenas, DocumentCloud Inc.
@@ -9496,7 +9496,7 @@ Lexer.prototype = {
 exports.Lexer = Lexer;
 
 })()
-},{"events":2,"./reg.js":4,"./state.js":5,"underscore":9}],14:[function(require,module,exports){
+},{"events":2,"./reg.js":3,"./state.js":4,"underscore":9}],14:[function(require,module,exports){
 exports.readIEEE754 = function(buffer, offset, isBE, mLen, nBytes) {
   var e, m,
       eLen = nBytes * 8 - mLen - 1,
@@ -10988,7 +10988,7 @@ SlowBuffer.prototype.writeDoubleBE = Buffer.prototype.writeDoubleBE;
 	module.exports.fromByteArray = uint8ToBase64;
 }());
 
-},{}]},{},["E/GbHF"])
+},{}]},{},["J3S9ww"])
 ;
 JSHINT = require('jshint').JSHINT;
 }());
