@@ -105,6 +105,7 @@
           }
         };
 
+
         this.get_content = function () { //function to capture regular content between tags
 
           var input_char = '',
