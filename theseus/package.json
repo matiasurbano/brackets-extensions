@@ -1,0 +1,18 @@
+{
+	"name" : "theseus",
+	"title" : "Theseus for Brackets",
+	"description" : "Retroactive debugging for JavaScript in Chrome and Node.js",
+	"homepage" : "https://github.com/adobe-research/theseus",
+	"version" : "0.4.8",
+	"author" : "Tom Lieber <tom@alltom.com>",
+	"license" : "MIT",
+	"dependencies" : {
+		"connect" : "2.3.4",
+		"mime" : "1.2.4",
+		"http-proxy" : "0.8.7",
+		"fondue" : "0.5.x"
+	},
+	"engines" : {
+		"brackets" : ">=0.30.0"
+	}
+}

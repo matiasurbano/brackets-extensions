@@ -25,71 +25,61 @@
 /*jslint plusplus: true, nomen: true, regexp: true, maxerr: 50 */
 
 define(function (require, exports, module) {
-    'use strict';
+  'use strict';
 
-    var NativeFileError = brackets.getModule("file/NativeFileError"),
-        Dialogs         = brackets.getModule("widgets/Dialogs");
+  var NativeFileError = brackets.getModule("file/NativeFileError"),
+    Dialogs = brackets.getModule("widgets/Dialogs");
 
-    var linterManager   = require('linterManager'),
-        defaultSettings = require('defaultSettings'),
-        ProjectFiles    = require('ProjectFiles');
+  var ProjectFiles = require('ProjectFiles');
+  var linters = {};
 
-    var linterInfo = {
-        "jshint": {
-            configFile: ".jshintrc",
-            defaultSettings: defaultSettings.jshint
-        },
-        "jslint": {
-            configFile: ".jslintrc",
-            defaultSettings: defaultSettings.jslint
+
+  function loadProjectSettings(linter) {
+    linter.settings = linter.defaultSettings || {};
+
+    ProjectFiles.openFile(linter.settingsFile)
+      .done(function (fileReader) {
+      fileReader.readAsText().done(function (text) {
+        try {
+          linter.settings = JSON.parse(text);
+        } catch (ex) {
+          Dialogs.showModalDialog(
+            "interactiveLinterErr",
+            "Interactive Linter Error",
+            "Error processing linter settings<br>" +
+            ex.toString());
         }
-    };
+      });
+    })
+      .fail(function (err) {
+      if (err.name !== NativeFileError.NOT_FOUND_ERR) {
+        return;
+      }
 
-    //linterManager.setType( linterManager.types.jshint );
-    //linterManager.setType( linterManager.types.jslint );
-
-    function getLinterInfo () {
-        var info = linterInfo[linterManager.getType()];
-        if (!info){
-            throw "Unknown linter type";
-        }
-        return info;
-    }
-
-
-    function setSettings(settings) {
-        linterManager.setSettings(settings);
-    }
-
-
-    $(ProjectFiles).on('projectOpen', function() {
-        var info = getLinterInfo();
-        setSettings(info.defaultSettings);
-
-        ProjectFiles.openFile( info.configFile )
-        .done(function( fileReader ) {
-            fileReader.readAsText().done(function (text) {
-                try {
-                    setSettings( JSON.parse(text) );
-                }
-                catch( ex ) {
-                    Dialogs.showModalDialog(
-                        "interactiveLinterErr",
-                        "Interactive Linter Error",
-                        "Error processing jshint settings<br>" +
-                        ex.toString());
-                }
-            });
-        })
-        .fail(function(err){
-            if( err.name !== NativeFileError.NOT_FOUND_ERR ) {
-                return;
-            }
-
-            ProjectFiles.openFile( info.configFile, "write", true ).done(function( fileWriter ) {
-                fileWriter.write( JSON.stringify( info.defaultSettings ) );
-            });
-        });
+      ProjectFiles.openFile(linter.settingsFile, "write", true).done(function (fileWriter) {
+        fileWriter.write(JSON.stringify(linter.defaultSettings));
+      });
     });
+  }
+
+
+  $(ProjectFiles).on('projectOpen', function () {
+    for (var iLinter in linters) {
+      if (linters.hasOwnProperty(iLinter)) {
+        loadProjectSettings(linters[iLinter]);
+      }
+    }
+  });
+
+
+  function register(linter) {
+    linters[linter.name] = linter;
+    loadProjectSettings(linter);
+  }
+
+
+  return {
+    register: register
+  };
 
 });
